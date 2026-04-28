@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Search App</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            font-size: 28px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .status-bar {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .status-ok {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 14px 18px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            transition: border-color 0.3s;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        input[type="text"]:disabled {
+            background: #eee;
+            cursor: not-allowed;
+        }
+        button {
+            padding: 14px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+        .btn-scan {
+            background: #28a745;
+            color: white;
+        }
+        .btn-scan:hover {
+            background: #218838;
+        }
+        .btn-scan:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .btn-search {
+            background: #667eea;
+            color: white;
+        }
+        .btn-search:hover {
+            background: #5568d3;
+        }
+        .btn-search:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .btn-download {
+            background: #17a2b8;
+            color: white;
+        }
+        .btn-download:hover {
+            background: #138496;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .result-card {
+            padding: 18px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            margin-bottom: 15px;
+            border-radius: 6px;
+        }
+        .result-card h3 {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        .meta {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .meta span {
+            margin-right: 15px;
+        }
+        .abstract {
+            color: #444;
+            line-height: 1.5;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
+        .no-results {
+            text-align: center;
+            color: #999;
+            padding: 50px;
+            font-size: 18px;
+            font-style: italic;
+        }
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            font-size: 14px;
+            color: #667eea;
+        }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 PDF Search & Crawler</h1>
+
+        <!-- Status Bar -->
+        <div id="status" class="status-bar status-warning">
+            Loading app status...
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button id="scanBtn" class="btn-scan" onclick="triggerScan()">
+                🔍 Scan PDFs
+            </button>
+            <input type="text" id="q" placeholder="Search in PDFs (title, abstract, journal, year)..." disabled>
+            <button id="searchBtn" class="btn-search" onclick="search()" disabled>
+                Search
+            </button>
+            <button class="btn-download" onclick="window.location.href='/download'">
+                ⬇️ CSV
+            </button>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loader" class="loader">
+            <div class="spinner"></div> Processing...
+        </div>
+
+        <!-- Results -->
+        <div id="results" class="results"></div>
+
+        <div class="footer">
+            <p>Place PDF files in the <code>data/</code> folder and click "Scan PDFs" to index them.</p>
+        </div>
+    </div>
+
+    <script>
+        let appReady = false;
+
+        async function updateStatus() {
+            try {
+                const resp = await fetch('/api/status');
+                const data = await resp.json();
+                const statusEl = document.getElementById('status');
+                const scanBtn = document.getElementById('scanBtn');
+                const searchInput = document.getElementById('q');
+                const searchBtn = document.getElementById('searchBtn');
+
+                if (!data.data_directory_exists) {
+                    statusEl.className = 'status-bar status-error';
+                    statusEl.textContent = '❌ Data directory not found. Restart the app to recreate it.';
+                    scanBtn.disabled = true;
+                    searchInput.disabled = true;
+                    searchBtn.disabled = true;
+                    return;
+                }
+
+                if (data.pdf_files_count === 0) {
+                    statusEl.className = 'status-bar status-warning';
+                    statusEl.textContent = '📂 No PDF files found in data/ folder. Add .pdf files and click "Scan PDFs".';
+                    scanBtn.disabled = false;
+                    searchInput.disabled = true;
+                    searchBtn.disabled = true;
+                    appReady = false;
+                } else if (data.csv_exists && data.indexed_pdfs_count > 0) {
+                    statusEl.className = 'status-bar status-ok';
+                    statusEl.textContent = `✅ Ready: ${data.indexed_pdfs_count} PDF(s) indexed and searchable`;
+                    scanBtn.disabled = false;
+                    searchInput.disabled = false;
+                    searchBtn.disabled = false;
+                    appReady = true;
+                } else if (data.pdf_files_count > 0 && data.indexed_pdfs_count === 0) {
+                    statusEl.className = 'status-bar status-warning';
+                    statusEl.textContent = `⏳ Found ${data.pdf_files_count} PDF(s) but not yet indexed. Click "Scan PDFs" to start.`;
+                    scanBtn.disabled = false;
+                    searchInput.disabled = true;
+                    searchBtn.disabled = true;
+                    appReady = false;
+                }
+
+            } catch (err) {
+                console.error('Status error:', err);
+                document.getElementById('status').className = 'status-bar status-error';
+                document.getElementById('status').textContent = '❌ Could not connect to server.';
+            }
+        }
+
+        async function triggerScan() {
+            const scanBtn = document.getElementById('scanBtn');
+            const loader = document.getElementById('loader');
+            
+            scanBtn.disabled = true;
+            loader.style.display = 'block';
+            
+            try {
+                const resp = await fetch('/scan', { method: 'POST' });
+                const data = await resp.json();
+                
+                setTimeout(updateStatus, 500); // Refresh status after scan
+                setTimeout(() => {
+                    loader.style.display = 'none';
+                    alert(data.message || (data.status === 'success' ? 'Scan complete!' : 'Scan finished'));
+                }, 500);
+            } catch (err) {
+                console.error('Scan error:', err);
+                alert('Failed to trigger scan: ' + err.message);
+                scanBtn.disabled = false;
+                loader.style.display = 'none';
+            }
+        }
+
+        async function search() {
+            const q = document.getElementById('q').value.trim();
+            if (!q) return;
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loader"><div class="spinner"></div> Searching...</div>';
+
+            try {
+                const res = await fetch('/search?q=' + encodeURIComponent(q));
+                const data = await res.json();
+
+                if (!data.results || data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="no-results">🔍 No results found for "' + q + '"</div>';
+                    return;
+                }
+
+                let html = '';
+                data.results.forEach(r => {
+                    const year = r.year || 'N/A';
+                    const journal = r.journal ? r.journal.substring(0, 50) + (r.journal.length > 50 ? '...' : '') : 'N/A';
+                    const abstract = r.abstract ? r.abstract.substring(0, 400) + (r.abstract.length > 400 ? '...' : '') : '';
+                    
+                    html += `
+                        <div class="result-card">
+                            <h3>${r.title}</h3>
+                            <div class="meta">
+                                <span>📅 ${year}</span>
+                                <span>📖 ${journal}</span>
+                                <span>📄 ${r.filename}</span>
+                            </div>
+                            <div class="abstract">${abstract || 'No abstract available.'}</div>
+                        </div>
+                    `;
+                });
+                resultsDiv.innerHTML = html;
+            } catch (err) {
+                console.error('Search error:', err);
+                resultsDiv.innerHTML = '<div class="status-bar status-error">Search failed: ' + err.message + '</div>';
+            }
+        }
+
+        // Allow Enter key for search
+        document.getElementById('q').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                search();
+            }
+        });
+
+        // Initial status check
+        updateStatus();
+        // Refresh every 5 seconds
+        setInterval(updateStatus, 5000);
+    </script>
+</body>
+</html>
