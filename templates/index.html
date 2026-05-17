@@ -106,12 +106,16 @@
             background: #ccc;
             cursor: not-allowed;
         }
-        .btn-download {
+        .btn-download-docx {
             background: #17a2b8;
             color: white;
         }
-        .btn-download:hover {
+        .btn-download-docx:hover {
             background: #138496;
+        }
+        .btn-download-docx:disabled {
+            background: #ccc;
+            cursor: not-allowed;
         }
         .btn-upload {
             background: #ff8c00;
@@ -256,8 +260,8 @@
             <button id="searchBtn" class="btn-search" onclick="search()" disabled>
                 Search
             </button>
-            <button class="btn-download" onclick="window.location.href='/download'">
-                ⬇️ CSV
+            <button class="btn-download-docx" onclick="window.location.href='/download-docx'">
+                ⬇️ Word Report
             </button>
         </div>
 

@@ -1,3 +1,4 @@
 flask
 pypdf
 gunicorn
+python-docx

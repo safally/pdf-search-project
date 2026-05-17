@@ -2,10 +2,14 @@ import os
 import sys
 import csv
 import logging
+import datetime
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 from pypdf import PdfReader
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # Configure logging
 logging.basicConfig(
@@ -20,7 +24,8 @@ app = Flask(__name__)
 # Paths
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
-CSV_PATH = DATA_DIR / "pdf_data.csv"
+CSV_PATH          = DATA_DIR / "pdf_data.csv"
+DOCX_PATH         = DATA_DIR / "pdf_report.docx"
 
 
 def ensure_data_directory():
@@ -152,6 +157,13 @@ def scan_pdfs(force_rescan=False):
             writer.writeheader()
             writer.writerows(data)
         logger.info(f"[SUCCESS] CSV generated: {CSV_PATH} ({len(data)} entries)")
+
+        # Generate Word report from the same index data
+        try:
+            generate_docx_report(data)
+        except Exception as e:
+            logger.error(f"[WARN] CSV saved but Word report generation failed: {e}")
+
         return True, f"Successfully indexed {len(data)} PDF(s)", len(data)
     except Exception as e:
         logger.error(f"Failed to write CSV: {e}")
@@ -167,6 +179,92 @@ def count_pdfs_in_csv():
             return sum(1 for _ in f) - 1
     except:
         return 0
+
+
+def generate_docx_report(data):
+    """
+    Build a clean Word document from indexed PDF data.
+    Saves to DATA_DIR / 'pdf_report.docx'.
+    Returns the path to the saved file.
+    """
+    ensure_data_directory()
+
+    doc = Document()
+
+    # --- Page margins ---
+    section = doc.sections[0]
+    section.left_margin   = Inches(1.0)
+    section.right_margin  = Inches(1.0)
+    section.top_margin    = Inches(1.0)
+    section.bottom_margin = Inches(1.0)
+
+    # --- Report title ---
+    title_para = doc.add_heading("PDF Search Index Report", level=1)
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # --- Timestamp & count ---
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    meta = doc.add_paragraph()
+    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = meta.add_run(f"Generated: {now}  |  Total PDFs indexed: {len(data)}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+
+    doc.add_paragraph()  # blank spacer
+
+    # --- Per-entry helper ---
+    def add_entry(entry, index):
+        # Page break before every entry except the first
+        if index > 0:
+            doc.add_page_break()
+
+        # Filename heading
+        filename = entry.get("filename", "Unknown")
+        h = doc.add_heading(f"Entry {index + 1}: {filename}", level=2)
+        h.runs[0].font.color.rgb = RGBColor(0x33, 0x33, 0x7A)
+
+        def add_label_value(label, value):
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(2)
+            p.paragraph_format.space_after  = Pt(2)
+            r1 = p.add_run(f"{label}  ")
+            r1.bold = True
+            r1.font.size = Pt(11)
+            r1.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
+            r2 = p.add_run(value or "N/A")
+            r2.font.size = Pt(11)
+
+        add_label_value("Filename:", filename)
+        add_label_value("Title:",    entry.get("title", "N/A"))
+        add_label_value("Year:",     entry.get("year",  "N/A"))
+        add_label_value("Journal:",  entry.get("journal", "N/A"))
+
+        abstract = entry.get("abstract", "N/A") or "N/A"
+        abs_para = doc.add_paragraph()
+        abs_para.paragraph_format.space_before = Pt(2)
+        abs_para.paragraph_format.space_after  = Pt(2)
+        abs_label = abs_para.add_run("Abstract:  ")
+        abs_label.bold = True
+        abs_label.font.size = Pt(11)
+        abs_label.font.color.rgb = RGBColor(0x33, 0x33, 0x33)
+        abs_text = abs_para.add_run(abstract)
+        abs_text.font.size = Pt(11)
+
+        # Separator
+        sep = doc.add_paragraph("─" * 80)
+        sep.runs[0].font.size  = Pt(8)
+        sep.runs[0].font.color.rgb = RGBColor(0xAA, 0xAA, 0xAA)
+        sep.paragraph_format.space_before = Pt(6)
+        sep.paragraph_format.space_after  = Pt(6)
+
+    # --- Render every entry ---
+    for idx, entry in enumerate(data):
+        add_entry(entry, idx)
+
+    # --- Save ---
+    doc.save(str(DOCX_PATH))
+    logger.info(f"Word report generated: {DOCX_PATH} ({len(data)} entries)")
+    return DOCX_PATH
 
 
 def get_search_results(query):
@@ -381,13 +479,13 @@ def api_status():
     })
 
 
-@app.route("/download")
-def download_csv():
-    """Download the CSV file."""
-    if CSV_PATH.exists():
-        return send_from_directory(DATA_DIR, "pdf_data.csv", as_attachment=True)
+@app.route("/download-docx")
+def download_docx():
+    """Download the generated Word report."""
+    if DOCX_PATH.exists():
+        return send_from_directory(DATA_DIR, "pdf_report.docx", as_attachment=True)
     else:
-        return jsonify({"error": "CSV not found. Run /scan first."}), 404
+        return jsonify({"error": "Word report not found. Run /scan first."}), 404
 
 
 # ============== App Initialization ==============
