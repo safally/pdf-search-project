@@ -2,3 +2,5 @@ flask
 pypdf
 gunicorn
 python-docx
+beautifulsoup4
+requests
