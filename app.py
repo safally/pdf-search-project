@@ -2,7 +2,6 @@ import os
 import sys
 import csv
 import logging
-import shutil
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
@@ -168,143 +167,6 @@ def count_pdfs_in_csv():
             return sum(1 for _ in f) - 1
     except:
         return 0
-
-
-def auto_discover_and_import_pdfs():
-    """
-    Auto-discover PDF files from common user directories and import them into DATA_DIR.
-    
-    Searches recursively in:
-    - ~/Downloads
-    - ~/Desktop
-    
-    Can be customized via env var PDF_SEARCH_PATHS (comma-separated paths)
-    
-    Returns: (copied_count: int, source_stats: dict)
-    """
-    home = Path.home()
-    
-    # Support custom paths via environment variable
-    custom_paths_env = os.environ.get('PDF_SEARCH_PATHS', '').strip()
-    if custom_paths_env:
-        search_paths = []
-        for p in custom_paths_env.split(','):
-            p = p.strip()
-            if p:
-                path = Path(p).expanduser()
-                if path.exists() and path.is_dir():
-                    search_paths.append(path)
-                else:
-                    logger.warning(f"Custom search path does not exist or is not a directory: {path}")
-    else:
-        # Default search locations
-        search_paths = [
-            home / "Downloads",
-            home / "Desktop"
-        ]
-    
-    # Filter to only existing directories
-    valid_search_paths = [p for p in search_paths if p.exists() and p.is_dir()]
-    
-    if not valid_search_paths:
-        logger.info("No valid search directories found. Skipping auto-discovery.")
-        return 0, {}
-    
-    logger.info(f"No PDFs in data/. Searching {len(valid_search_paths)} directory(ies)...")
-    
-    # Collect all unique PDFs by filename to avoid duplicates across locations
-    collected_pdfs = {}  # filename -> Path object (first occurrence wins)
-    
-    for search_dir in valid_search_paths:
-        try:
-            # Use rglob for recursive search
-            # Limit depth for safety: limit to reasonable depth (avoid scanning deeply nested dirs)
-            max_depth = 5  # configurable safety limit
-            for pdf_path in search_dir.rglob("*.pdf"):
-                # Check depth relative to search_dir
-                try:
-                    rel_parts = pdf_path.relative_to(search_dir).parts
-                    if len(rel_parts) > max_depth:
-                        continue  # skip very deep files
-                except ValueError:
-                    pass  # should not happen
-                
-                filename = pdf_path.name
-                if filename not in collected_pdfs:
-                    collected_pdfs[filename] = pdf_path
-            
-            # Also find uppercase .PDF files
-            for pdf_path in search_dir.rglob("*.PDF"):
-                try:
-                    rel_parts = pdf_path.relative_to(search_dir).parts
-                    if len(rel_parts) > max_depth:
-                        continue
-                except ValueError:
-                    pass
-                
-                filename = pdf_path.name
-                if filename not in collected_pdfs:
-                    collected_pdfs[filename] = pdf_path
-                    
-        except PermissionError as e:
-            logger.warning(f"Permission denied accessing {search_dir}: {e}")
-        except Exception as e:
-            logger.error(f"Error scanning {search_dir}: {e}")
-    
-    # Get set of existing files in DATA_DIR (case-insensitive on macOS)
-    existing_files = set()
-    if DATA_DIR.exists():
-        for f in DATA_DIR.glob("*.pdf"):
-            existing_files.add(f.name.lower())
-    
-    # Determine which files need copying (skip existing by name, case-insensitive)
-    to_copy = {}
-    for filename, src_path in collected_pdfs.items():
-        if filename.lower() not in existing_files:
-            to_copy[filename] = src_path
-    
-    # Log discovery summary by source
-    source_counts = {}
-    for src_path in collected_pdfs.values():
-        src_dir = str(src_path.parent)
-        source_counts[src_dir] = source_counts.get(src_dir, 0) + 1
-    
-    for src_dir, count in source_counts.items():
-        logger.info(f"   [INFO] Found {count} PDF(s) in {src_dir}")
-    
-    logger.info(f"   [INFO] Total unique PDFs found: {len(collected_pdfs)}")
-    logger.info(f"   [INFO] Already in data/ (skipping): {len(existing_files)}")
-    logger.info(f"   [INFO] To import: {len(to_copy)}")
-    
-    # Copy files
-    copied = 0
-    for filename, src_path in sorted(to_copy.items()):
-        dest_path = DATA_DIR / filename
-        
-        # Handle name collision (should be rare since we deduped)
-        if dest_path.exists():
-            base = dest_path.stem
-            ext = dest_path.suffix
-            counter = 1
-            while dest_path.exists():
-                dest_path = DATA_DIR / f"{base}_{counter}{ext}"
-                counter += 1
-        
-        try:
-            shutil.copy2(src_path, dest_path)
-            copied += 1
-            logger.info(f"   [IMPORT] Copied: {filename}")
-        except PermissionError as e:
-            logger.error(f"   [ERROR] Permission denied copying {filename}: {e}")
-        except Exception as e:
-            logger.error(f"   [ERROR] Failed to copy {filename}: {e}")
-    
-    if copied > 0:
-        logger.info(f"[SUCCESS] Imported {copied} PDF(s) into {DATA_DIR}")
-    else:
-        logger.info("No new PDFs to import.")
-    
-    return copied, source_counts
 
 
 def get_search_results(query):
@@ -539,37 +401,19 @@ def initialize_app():
     logger.info("=" * 60)
 
     # Step 1: Ensure data directory exists
-    created = ensure_data_directory()
-    if created:
-        logger.info("Data directory created.")
+    ensure_data_directory()
 
-    # Step 2: Check for existing CSV or auto-scan
-    if CSV_PATH.exists():
-        count = count_pdfs_in_csv()
-        logger.info(f"Found existing CSV index: {CSV_PATH.name} ({count} entries)")
+    # Step 2: App starts with no pre-loaded PDFs. Only user-uploaded files will
+    # be indexed (via /upload or /scan). Do NOT scan ~/Downloads or ~/Desktop.
+    pdf_count = len(list(DATA_DIR.glob("*.pdf"))) if DATA_DIR.exists() else 0
+    if pdf_count > 0:
+        logger.info(f"Found {pdf_count} existing PDF(s) in data/. To index them, click 'Scan PDFs'.")
     else:
-        pdf_count = len(list(DATA_DIR.glob("*.pdf"))) if DATA_DIR.exists() else 0
-        
-        if pdf_count == 0:
-            # Auto-discover and import PDFs from common user directories
-            logger.info("No PDFs in data/. Starting auto-discovery from ~/Downloads and ~/Desktop...")
-            imported_count, _ = auto_discover_and_import_pdfs()
-            # Re-count after import
-            pdf_count = len(list(DATA_DIR.glob("*.pdf"))) if DATA_DIR.exists() else 0
-        
-        if pdf_count > 0:
-            logger.info(f"Found {pdf_count} PDF(s) in data/. Generating search index...")
-            success, message, count = scan_pdfs(force_rescan=True)
-            if success:
-                logger.info(f"CSV generated successfully: {count} entries")
-            else:
-                logger.warning(f"Scan failed: {message}")
-        else:
-            logger.warning("No PDFs found in data/ or user directories. Search will return no results.")
-    
+        logger.info("data/ is empty. No PDFs pre-loaded. Upload PDFs via the UI to get started.")
+
     logger.info("=" * 60)
     logger.info("Initialization complete. Ready to serve requests.")
-    
+
     # Verify template exists (fail fast if missing)
     template_path = BASE_DIR / "templates" / "index.html"
     if not template_path.exists():

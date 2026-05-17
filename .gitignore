@@ -1,0 +1,22 @@
+# --- Project / build artefacts ---
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
+.venv/
+venv/
+.DS_Store
+
+# --- Render / platform ---
+bin/
+include/
+lib/
+
+# --- PDF-specific: ignore files inside data/, not the folder itself ---
+data/*.pdf
+data/*.PDF
+data/pdf_data.csv
+
+# --- Keep the data directory tracked but empty ---
+!data/.gitkeep
