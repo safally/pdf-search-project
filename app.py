@@ -3,6 +3,7 @@ import sys
 import csv
 import logging
 import datetime
+import re
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
@@ -59,7 +60,6 @@ def extract_metadata_from_text(text):
     title = title[:100].strip()
 
     # Extract year (4-digit number between 1900-2099)
-    import re
     year_pattern = r'\b(19[0-9]{2}|20[0-9]{2})\b'
     for line in lines[:10]:
         match = re.search(year_pattern, line)
@@ -424,7 +424,6 @@ def search():
 @app.route("/debug/files")
 def debug_files():
     """Debug endpoint to show filesystem state."""
-    import os
     try:
         cwd = os.getcwd()
         base_dir = str(BASE_DIR.absolute())
