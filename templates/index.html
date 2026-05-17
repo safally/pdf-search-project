@@ -113,6 +113,65 @@
         .btn-download:hover {
             background: #138496;
         }
+        .btn-upload {
+            background: #ff8c00;
+            color: white;
+        }
+        .btn-upload:hover {
+            background: #e07000;
+        }
+        .btn-upload:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .upload-section {
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 2px dashed #ddd;
+        }
+        .upload-section h2 {
+            font-size: 18px;
+            color: #555;
+            margin-bottom: 15px;
+        }
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .upload-file-input {
+            display: none;
+        }
+        .upload-file-label {
+            display: inline-block;
+            padding: 14px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            background: #f0f0f0;
+            color: #333;
+            border: 2px dashed #bbb;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .upload-file-label:hover {
+            border-color: #ff8c00;
+            background: #fff8f0;
+        }
+        .upload-filename {
+            font-size: 13px;
+            color: #666;
+            min-height: 20px;
+        }
+        .upload-status {
+            min-height: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .upload-status-uploading  { color: #e67e22; }
+        .upload-status-success   { color: #27ae60; }
+        .upload-status-error     { color: #e74c3c; }
         .results {
             margin-top: 20px;
         }
@@ -209,6 +268,22 @@
 
         <!-- Results -->
         <div id="results" class="results"></div>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <h2>📥 Upload PDF</h2>
+            <div class="upload-form">
+                <input type="file" id="uploadFile" class="upload-file-input" accept=".pdf,application/pdf" />
+                <label for="uploadFile" class="upload-file-label" id="uploadLabel">
+                    Choose PDF file
+                </label>
+                <span id="uploadFilename" class="upload-filename"></span>
+                <button id="uploadBtn" class="btn-upload" onclick="uploadFile()">
+                    Upload
+                </button>
+                <span id="uploadStatus" class="upload-status"></span>
+            </div>
+        </div>
 
         <div class="footer">
             <p>Place PDF files in the <code>data/</code> folder and click "Scan PDFs" to index them.</p>
@@ -338,6 +413,68 @@
                 search();
             }
         });
+
+        // === Upload Section ===
+        const fileInput         = document.getElementById('uploadFile');
+        const uploadLabel       = document.getElementById('uploadLabel');
+        const uploadFilenameEl  = document.getElementById('uploadFilename');
+        const uploadBtn         = document.getElementById('uploadBtn');
+        const uploadStatusEl    = document.getElementById('uploadStatus');
+
+        fileInput.addEventListener('change', function() {
+            const f = this.files[0];
+            if (f) {
+                uploadLabel.textContent = 'Selected: ' + f.name;
+                uploadFilenameEl.textContent = f.name;
+            } else {
+                uploadLabel.textContent = 'Choose PDF file';
+                uploadFilenameEl.textContent = '';
+            }
+        });
+
+        function setUploadStatus(msg, cls) {
+            uploadStatusEl.textContent = msg;
+            uploadStatusEl.className   = 'upload-status ' + cls;
+        }
+
+        async function uploadFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                setUploadStatus('Please select a PDF file first.', 'upload-status-error');
+                return;
+            }
+
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                setUploadStatus('Only PDF files are allowed.', 'upload-status-error');
+                return;
+            }
+
+            uploadBtn.disabled = true;
+            setUploadStatus('Uploading...', 'upload-status-uploading');
+
+            try {
+                const formData = new FormData();
+                formData.append('pdf', file);
+
+                const resp = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await resp.json();
+
+                if (resp.ok && data.status === 'success') {
+                    setUploadStatus(data.message, 'upload-status-success');
+                    // Refresh status bar so search becomes available immediately
+                    setTimeout(updateStatus, 500);
+                    // Auto-clear success message after 5 s
+                    setTimeout(() => { if (uploadStatusEl.classList.contains('upload-status-success')) setUploadStatus('', ''); }, 5000);
+                } else {
+                    setUploadStatus(data.message || 'Upload failed.', 'upload-status-error');
+                }
+            } catch (err) {
+                console.error('Upload error:', err);
+                setUploadStatus('Upload failed: ' + err.message, 'upload-status-error');
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        }
 
         // Initial status check
         updateStatus();

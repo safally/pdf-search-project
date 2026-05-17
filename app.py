@@ -5,6 +5,7 @@ import logging
 import shutil
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
+from werkzeug.utils import secure_filename
 from pypdf import PdfReader
 
 # Configure logging
@@ -385,6 +386,61 @@ def scan():
             "message": message,
             "count": count
         })
+
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    """
+    Accept a PDF file upload, save it to DATA_DIR, and re-index.
+    Returns JSON: {"message": "Uploaded successfully. Indexed X PDFs."}
+    """
+    ensure_data_directory()
+
+    if "pdf" not in request.files:
+        logger.warning("Upload request received with no file field 'pdf'.")
+        return jsonify({"status": "error", "message": "No file field 'pdf' in request."}), 400
+
+    uploaded_file = request.files["pdf"]
+
+    if uploaded_file.filename == "" or uploaded_file.filename is None:
+        logger.warning("Upload request received with empty filename.")
+        return jsonify({"status": "error", "message": "No file selected."}), 400
+
+    filename = secure_filename(uploaded_file.filename)
+
+    if not filename.lower().endswith(".pdf"):
+        logger.warning(f"Upload rejected — not a PDF: {filename}")
+        return jsonify({"status": "error", "message": "Only PDF files are allowed."}), 400
+
+    # Handle duplicate filenames by appending _1, _2, ...
+    save_path = DATA_DIR / filename
+    if save_path.exists():
+        base = save_path.stem
+        ext = save_path.suffix
+        counter = 1
+        while save_path.exists():
+            save_path = DATA_DIR / f"{base}_{counter}{ext}"
+            counter += 1
+        logger.info(f"Duplicate filename detected. Saving as: {save_path.name}")
+    else:
+        logger.info(f"Saving upload as: {filename}")
+
+    try:
+        uploaded_file.save(str(save_path))
+        logger.info(f"Upload saved successfully: {save_path.name}")
+    except Exception as e:
+        logger.error(f"Failed to save uploaded file: {e}")
+        return jsonify({"status": "error", "message": f"Failed to save file: {e}"}), 500
+
+    logger.info("Triggering PDF re-index after upload...")
+    success, message, count = scan_pdfs(force_rescan=True)
+
+    if success:
+        logger.info(f"Upload + index completed. Indexed {count} PDF(s).")
+        return jsonify({"status": "success", "message": f"Uploaded successfully. Indexed {count} PDFs."})
+    else:
+        logger.error(f"Upload saved but indexing failed: {message}")
+        return jsonify({"status": "error", "message": f"File uploaded but indexing failed: {message}"}), 500
 
 
 @app.route("/search")
